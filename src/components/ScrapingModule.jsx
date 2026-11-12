@@ -150,9 +150,10 @@ export default function ScrapingModule({
 
   const productosVisibles = useMemo(() => {
     if (activeTermFilter === 'TODOS') return productos
-    return productos.filter(
+    const matched = productos.filter(
       (p) => (p.termino_busqueda || '').trim().toLowerCase() === activeTermFilter.toLowerCase()
     )
+    return matched.length > 0 ? matched : productos
   }, [productos, activeTermFilter])
 
   const toggleProvider = (id) => {
@@ -177,6 +178,7 @@ export default function ScrapingModule({
 
     if (queries.length === 0 || selectedProviders.length === 0) return
 
+    setActiveTermFilter('TODOS')
     pauseRef.current = false
     cancelRef.current = false
 

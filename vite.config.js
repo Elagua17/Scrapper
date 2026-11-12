@@ -88,17 +88,12 @@ function calculateEffectivePromoPrice(basePrice, listPrice, promoName = '', expl
   return { finalPrice: Number(finalPrice.toFixed(2)), promoClean: cleanPromo }
 }
 
-/**
- * Busca un término en un proveedor VTEX usando su API de catálogo en tiempo real
- */
-async function searchVtexProvider(provider, queryText, limit = 5) {
-  const apiUrl = `${provider.baseUrl}/api/catalog_system/pub/products/search?ft=${encodeURIComponent(
-    queryText
-  )}&_from=0&_to=${Math.max(1, limit - 1)}`
-
+async function fetchVtexSearchRaw(baseUrl, q) {
+  const apiUrl = `${baseUrl}/api/catalog_system/pub/products/search?ft=${encodeURIComponent(
+    q
+  )}&_from=0&_to=24`
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 10000)
-
   try {
     const res = await fetch(apiUrl, {
       signal: controller.signal,
@@ -110,33 +105,82 @@ async function searchVtexProvider(provider, queryText, limit = 5) {
     })
     clearTimeout(timeout)
     if (!res.ok) return []
-
     const data = await res.json()
-    if (!Array.isArray(data)) return []
+    return Array.isArray(data) ? data : []
+  } catch {
+    clearTimeout(timeout)
+    return []
+  }
+}
 
-    // Filtrar para priorizar coincidencias relevantes con los términos buscados
-    const queryTokens = queryText
+/**
+ * Busca un término en un proveedor VTEX usando su API de catálogo en tiempo real
+ */
+async function searchVtexProvider(provider, queryText, limit = 5) {
+  try {
+    const normalizedQuery = String(queryText || '')
+      .replace(/,/g, '.')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+    let data = await fetchVtexSearchRaw(provider.baseUrl, normalizedQuery)
+
+    // Si la consulta completa con números/unidades no arrojó resultados directos, reintentar con las palabras principales
+    if (data.length === 0) {
+      const mainWords = normalizedQuery
+        .split(/\s+/)
+        .filter((w) => w.length >= 2)
+        .slice(0, 2)
+        .join(' ')
+      if (mainWords && mainWords !== normalizedQuery) {
+        data = await fetchVtexSearchRaw(provider.baseUrl, mainWords)
+      }
+    }
+
+    if (data.length === 0) return []
+
+    const queryTokens = normalizedQuery
       .toLowerCase()
       .split(/\s+/)
       .filter((t) => t.length >= 2)
 
     const items = []
     for (const p of data) {
-      const sku = p?.items?.[0]
-      const seller = sku?.sellers?.find((s) => s.sellerDefault) || sku?.sellers?.[0]
-      const offer = seller?.commertialOffer
-      const basePrice = Number(offer?.Price ?? offer?.spotPrice ?? 0)
-      let listPrice = Number(offer?.ListPrice ?? basePrice)
-      // Evitar errores de carga de ListPrice desproporcionados en algunos catálogos
-      if (listPrice > basePrice * 5) listPrice = basePrice
-      const stock = Number(offer?.AvailableQuantity ?? 0)
+      const skus = Array.isArray(p?.items) ? p.items : []
+      // Buscar el primer SKU que tenga precio y stock, o en su defecto el que tenga precio > 0
+      let selectedSku = null
+      let selectedOffer = null
 
-      if (basePrice <= 0 || stock <= 0) continue
+      for (const candidateSku of skus) {
+        const seller =
+          candidateSku?.sellers?.find((s) => s.sellerDefault) || candidateSku?.sellers?.[0]
+        const offer = seller?.commertialOffer
+        const price = Number(offer?.Price ?? offer?.spotPrice ?? 0)
+        const qty = Number(offer?.AvailableQuantity ?? 0)
+        if (price > 0 && qty > 0) {
+          selectedSku = candidateSku
+          selectedOffer = offer
+          break
+        }
+        if (price > 0 && !selectedOffer) {
+          selectedSku = candidateSku
+          selectedOffer = offer
+        }
+      }
+
+      if (!selectedSku || !selectedOffer) continue
+
+      const basePrice = Number(selectedOffer?.Price ?? selectedOffer?.spotPrice ?? 0)
+      let listPrice = Number(selectedOffer?.ListPrice ?? basePrice)
+      if (listPrice > basePrice * 5) listPrice = basePrice
+      const stock = Number(selectedOffer?.AvailableQuantity ?? 0)
+
+      if (basePrice <= 0) continue
 
       const rawTeaserName =
-        offer?.PromotionTeasers?.[0]?.Name ||
-        offer?.Teasers?.[0]?.['<Name>k__BackingField'] ||
-        offer?.Teasers?.[0]?.name ||
+        selectedOffer?.PromotionTeasers?.[0]?.Name ||
+        selectedOffer?.Teasers?.[0]?.['<Name>k__BackingField'] ||
+        selectedOffer?.Teasers?.[0]?.name ||
         ''
 
       const { finalPrice, promoClean } = calculateEffectivePromoPrice(
@@ -146,14 +190,16 @@ async function searchVtexProvider(provider, queryText, limit = 5) {
         0
       )
 
-      const img = sku?.images?.[0]?.imageUrl || ''
+      const img = selectedSku?.images?.[0]?.imageUrl || ''
       const productUrl = p.link
         ? p.link.startsWith('http')
           ? p.link
           : `${provider.baseUrl}${p.link}`
         : `${provider.baseUrl}/${p.linkText}/p`
 
-      const titleLower = String(p.productName || '').toLowerCase()
+      const titleLower = String(p.productName || '')
+        .toLowerCase()
+        .replace(/,/g, '.')
       const matchedTokens = queryTokens.filter((tk) => titleLower.includes(tk)).length
       const relevanceScore = queryTokens.length > 0 ? matchedTokens / queryTokens.length : 1
 
@@ -167,7 +213,8 @@ async function searchVtexProvider(provider, queryText, limit = 5) {
         precio_lista: listPrice,
         promo_texto: promoClean,
         moneda_origen: 'ARS',
-        stock,
+        stock: stock > 0 ? stock : 10,
+        hasStock: stock > 0,
         url_imagen: img,
         url_origen: productUrl,
         dominio_proveedor: provider.dominio,
@@ -177,15 +224,15 @@ async function searchVtexProvider(provider, queryText, limit = 5) {
       })
     }
 
-    // Ordenar por relevancia y luego por menor precio
+    // Ordenar priorizando coincidencia relevante, disponibilidad en stock y menor precio
     return items
       .sort((a, b) => {
         if (b.relevanceScore !== a.relevanceScore) return b.relevanceScore - a.relevanceScore
+        if (a.hasStock !== b.hasStock) return a.hasStock ? -1 : 1
         return a.precio_fob - b.precio_fob
       })
       .slice(0, limit)
   } catch {
-    clearTimeout(timeout)
     return []
   }
 }

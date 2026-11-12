@@ -104,7 +104,11 @@ export function loadDatabase() {
 }
 
 export function saveDatabase(db) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(db))
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(db))
+  } catch {
+    // Evitar bloqueo si el almacenamiento local alcanza el límite
+  }
 }
 
 export function resetDatabaseClean() {
