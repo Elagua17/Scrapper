@@ -1,0 +1,139 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --nexus-orange: #FF5500;
+  --nexus-orange-light: #FF7A33;
+  --nexus-orange-dark: #CC4400;
+  --nexus-bg: #F8FAFC;
+  --nexus-surface: #FFFFFF;
+}
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    background-color: #F8FAFC;
+    color: #0F172A;
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, h4, .font-display {
+    font-family: 'Space Grotesk', system-ui, sans-serif;
+    letter-spacing: -0.02em;
+  }
+
+  code, pre, .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+/* Fondo técnico futurista en blanco con retícula geométrica ultra sutil y halo naranja */
+.bg-futuristic-grid {
+  background-color: #F8FAFC;
+  background-image: 
+    radial-gradient(at 85% 5%, rgba(255, 85, 0, 0.08) 0px, transparent 45%),
+    radial-gradient(at 10% 90%, rgba(255, 122, 51, 0.06) 0px, transparent 40%),
+    linear-gradient(to right, rgba(226, 232, 240, 0.55) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(226, 232, 240, 0.55) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 36px 36px, 36px 36px;
+}
+
+/* Tarjetas futuristas blancas con borde técnico y acento naranja */
+.nexus-card {
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  box-shadow: 0 10px 30px -12px rgba(15, 23, 42, 0.05);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.nexus-card:hover {
+  border-color: rgba(255, 85, 0, 0.35);
+  box-shadow: 0 14px 34px -12px rgba(255, 85, 0, 0.10);
+}
+
+.nexus-card-active {
+  background: #FFFFFF;
+  border: 1.5px solid #FF5500;
+  box-shadow: 0 12px 30px -8px rgba(255, 85, 0, 0.18);
+}
+
+/* Botón primario futurista naranja */
+.btn-nexus-primary {
+  background: linear-gradient(135deg, #FF5500 0%, #FF7700 100%);
+  color: #FFFFFF;
+  font-weight: 600;
+  box-shadow: 0 6px 20px -4px rgba(255, 85, 0, 0.42);
+  transition: all 0.2s ease;
+}
+
+.btn-nexus-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #E84D00 0%, #FF6600 100%);
+  box-shadow: 0 8px 25px -3px rgba(255, 85, 0, 0.55);
+  transform: translateY(-1px);
+}
+
+.btn-nexus-primary:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn-nexus-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Esquinas HUD futuristas */
+.hud-corner {
+  position: relative;
+}
+.hud-corner::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 8px;
+  height: 8px;
+  border-top: 2px solid #FF5500;
+  border-left: 2px solid #FF5500;
+  border-top-left-radius: 2px;
+  pointer-events: none;
+}
+.hud-corner::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 8px;
+  height: 8px;
+  border-bottom: 2px solid #FF5500;
+  border-right: 2px solid #FF5500;
+  border-bottom-right-radius: 2px;
+  pointer-events: none;
+}
+
+/* Barra de progreso animada */
+@keyframes pulseGlow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.65; }
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Scrollbar limpio blanco y naranja */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: #F1F5F9;
+}
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #FF5500;
+}
