@@ -34,6 +34,27 @@ const formatMoney = (val) =>
     maximumFractionDigits: 2
   })
 
+async function postJsonApi(endpoint, body) {
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  })
+  const contentType = res.headers.get('content-type') || ''
+  if (!contentType.includes('application/json')) {
+    throw new Error(
+      res.status === 404
+        ? `El servidor no expone ${endpoint} (HTTP 404). Ejecutá la aplicación con "npm run dev", "npm run preview" o "npm start".`
+        : `El servidor devolvió una respuesta no válida en ${endpoint} (HTTP ${res.status}).`
+    )
+  }
+  const payload = await res.json()
+  if (!res.ok && !payload?.userMessage) {
+    throw new Error(`Error HTTP ${res.status} al consultar ${endpoint}.`)
+  }
+  return payload
+}
+
 const AVAILABLE_PROVIDERS = [
   { id: 'carrefour', name: 'Carrefour', domain: 'carrefour.com.ar' },
   { id: 'dia', name: 'Día Online', domain: 'diaonline.supermercadosdia.com.ar' },
@@ -95,6 +116,7 @@ export default function ScrapingModule({
   })
   const pauseRef = useRef(false)
   const cancelRef = useRef(false)
+  const [searchFeedback, setSearchFeedback] = useState(null)
 
   const [editingProduct, setEditingProduct] = useState(null)
 
@@ -179,6 +201,7 @@ export default function ScrapingModule({
     if (queries.length === 0 || selectedProviders.length === 0) return
 
     setActiveTermFilter('TODOS')
+    setSearchFeedback(null)
     pauseRef.current = false
     cancelRef.current = false
 
@@ -194,6 +217,8 @@ export default function ScrapingModule({
     })
 
     let totalExtractedInRun = 0
+    let lastErrorMessage = ''
+    let lastWarnMessage = ''
 
     for (let i = 0; i < queries.length; i++) {
       if (cancelRef.current) break
@@ -210,16 +235,11 @@ export default function ScrapingModule({
       }))
 
       try {
-        const res = await fetch('/api/multi-search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            queries: [query],
-            providers: selectedProviders,
-            maxPerProvider: Number(maxPerProvider) || 2
-          })
+        const payload = await postJsonApi('/api/multi-search', {
+          queries: [query],
+          providers: selectedProviders,
+          maxPerProvider: Number(maxPerProvider) || 2
         })
-        const payload = await res.json()
 
         const foundProducts = Array.isArray(payload.products) ? payload.products : []
         if (payload.ok && foundProducts.length > 0) {
@@ -258,17 +278,21 @@ export default function ScrapingModule({
             mensaje: `Se encontraron ${itemsToSave.length} opciones para "${query}". Proveedor más barato: ${winner.nombre_proveedor} ($ ${formatMoney(winner.precio_fob)}).`
           })
         } else {
+          lastWarnMessage =
+            payload.userMessage ||
+            `No se encontraron coincidencias directas para "${query}" en los proveedores seleccionados.`
           onAddLog({
             nivel: 'WARN',
             url: `Búsqueda: "${query}"`,
-            mensaje: `No se encontraron coincidencias directas para "${query}" en los proveedores seleccionados.`
+            mensaje: lastWarnMessage
           })
         }
-      } catch {
+      } catch (err) {
+        lastErrorMessage = err?.message || `Error de red al consultar proveedores para "${query}".`
         onAddLog({
           nivel: 'ERROR',
           url: `Búsqueda: "${query}"`,
-          mensaje: `Error de red al consultar proveedores para "${query}".`
+          mensaje: lastErrorMessage
         })
       }
 
@@ -277,6 +301,14 @@ export default function ScrapingModule({
         extractedCount: totalExtractedInRun,
         progress: Math.round(((i + 1) / queries.length) * 100)
       }))
+    }
+
+    if (totalExtractedInRun === 0 && !cancelRef.current) {
+      if (lastErrorMessage) {
+        setSearchFeedback({ type: 'error', message: lastErrorMessage })
+      } else if (lastWarnMessage) {
+        setSearchFeedback({ type: 'warn', message: lastWarnMessage })
+      }
     }
 
     setJobState((prev) => ({
@@ -301,6 +333,7 @@ export default function ScrapingModule({
 
     if (rawList.length === 0) return
 
+    setSearchFeedback(null)
     pauseRef.current = false
     cancelRef.current = false
 
@@ -316,6 +349,7 @@ export default function ScrapingModule({
     })
 
     let totalExtractedInRun = 0
+    let lastErrorMessage = ''
 
     for (let i = 0; i < rawList.length; i++) {
       if (cancelRef.current) {
@@ -340,15 +374,10 @@ export default function ScrapingModule({
       }))
 
       try {
-        const res = await fetch('/api/scrape', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            url: targetUrl,
-            exchangeRateARS: cotizacionDolar || 1050
-          })
+        const payload = await postJsonApi('/api/scrape', {
+          url: targetUrl,
+          exchangeRateARS: cotizacionDolar || 1050
         })
-        const payload = await res.json()
 
         await waitIfPaused()
         if (cancelRef.current) break
@@ -405,11 +434,13 @@ export default function ScrapingModule({
               `No se detectaron productos públicos directos en ${hostname}.`
           })
         }
-      } catch {
+      } catch (err) {
+        lastErrorMessage =
+          err?.message || 'Ocurrió un fallo de conexión al intentar leer la página del proveedor.'
         onAddLog({
           nivel: 'ERROR',
           url: targetUrl,
-          mensaje: 'Ocurrió un fallo de conexión al intentar leer la página del proveedor.'
+          mensaje: lastErrorMessage
         })
       }
 
@@ -418,6 +449,10 @@ export default function ScrapingModule({
         extractedCount: totalExtractedInRun,
         progress: Math.round(((i + 1) / rawList.length) * 100)
       }))
+    }
+
+    if (totalExtractedInRun === 0 && !cancelRef.current && lastErrorMessage) {
+      setSearchFeedback({ type: 'error', message: lastErrorMessage })
     }
 
     setJobState((prev) => ({
@@ -736,7 +771,10 @@ export default function ScrapingModule({
                     {searchQueriesText && (
                       <button
                         type="button"
-                        onClick={() => setSearchQueriesText('')}
+                        onClick={() => {
+                          setSearchQueriesText('')
+                          setSearchFeedback(null)
+                        }}
                         className="px-3 py-3 rounded-xl border border-slate-200 text-xs text-slate-500 hover:text-slate-800 hover:bg-slate-50"
                       >
                         Limpiar
@@ -873,6 +911,30 @@ export default function ScrapingModule({
                     </button>
                   </div>
                 )}
+              </div>
+            )}
+
+            {searchFeedback && (
+              <div
+                className={`nexus-card p-4 rounded-2xl border text-xs flex items-start gap-2.5 ${
+                  searchFeedback.type === 'error'
+                    ? 'bg-red-50/90 border-red-200 text-red-900'
+                    : 'bg-amber-50/90 border-amber-200 text-amber-900'
+                }`}
+              >
+                {searchFeedback.type === 'error' ? (
+                  <XCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-[#FF5500] shrink-0 mt-0.5" />
+                )}
+                <div className="space-y-1">
+                  <p className="font-semibold">
+                    {searchFeedback.type === 'error'
+                      ? 'No se pudo consultar el servicio de búsqueda'
+                      : 'Sin resultados en la búsqueda'}
+                  </p>
+                  <p className="leading-relaxed opacity-90">{searchFeedback.message}</p>
+                </div>
               </div>
             )}
           </div>
@@ -1192,7 +1254,9 @@ export default function ScrapingModule({
                               <ExternalLink className="w-3 h-3 shrink-0" />
                               <span>Ver en {prod.nombre_proveedor || 'tienda'}</span>
                             </a>
-                            <span className="font-mono text-slate-400">Disponible</span>
+                            <span className="font-mono text-slate-400">
+                              {Number(prod.stock) > 0 ? 'Disponible' : 'Consultar stock'}
+                            </span>
                           </div>
                         )}
                       </div>
